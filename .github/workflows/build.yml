@@ -71,7 +71,11 @@ jobs:
       - name: Install example deps and link lib
         run: |
           npm install
-          npm install --no-save file:./_lib
+          # Capacitor CLI resolves a custom platform by a package literally
+          # named after the platform ("harmony"), but our package is
+          # "capacitor-harmony". Install it under the alias "harmony" so
+          # `cap add harmony` / `cap sync harmony` can discover it.
+          npm install --no-save "harmony@file:./_lib"
           npx cap --version
 
       # ── Generate the harmony/ native project from the template ──────────
