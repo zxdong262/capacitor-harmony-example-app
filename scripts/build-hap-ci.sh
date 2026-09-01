@@ -66,6 +66,14 @@ else
 fi
 echo "    compileSdkVersion=${COMPILE_SDK_VERSION}"
 
+# compatibleSdkVersion drives the minAPIVersion recorded in pack.info, which
+# the device checks at install time ("版本错误" = device API < minAPIVersion).
+# Cloud-debug handsets may run older HarmonyOS than this CI SDK, so pin the
+# compatible version low (HarmonyOS 5.0 / API 12) instead of tying it to the
+# compile SDK. Override with COMPATIBLE_SDK_VERSION if ever needed.
+COMPATIBLE_SDK_VERSION="${COMPATIBLE_SDK_VERSION:-5.0.0(12)}"
+echo "    compatibleSdkVersion=${COMPATIBLE_SDK_VERSION}"
+
 # --- Generate build-profile.json5 (unsigned) -----------------------------
 cat > "${PROJECT_ROOT}/build-profile.json5" <<EOF
 {
@@ -74,7 +82,7 @@ cat > "${PROJECT_ROOT}/build-profile.json5" <<EOF
     "products": [
       {
         "name": "default",
-        "compatibleSdkVersion": "${COMPILE_SDK_VERSION}",
+        "compatibleSdkVersion": "${COMPATIBLE_SDK_VERSION}",
         "compileSdkVersion": "${COMPILE_SDK_VERSION}",
         "runtimeOS": "HarmonyOS",
         "buildOption": {
