@@ -190,9 +190,14 @@ jobs:
           echo "enabled=true" >> "$GITHUB_OUTPUT"
           echo "signing materials decoded"
 
-      - name: Configure bundle name
+      - name: Configure bundle name & versionCode
         env:
           BUNDLE_NAME: ${{ secrets.OHOS_BUNDLE_NAME }}
+          # Cloud debug remembers uploads per bundleName. We share the
+          # electerm bundle (org.electerm.electerm, versionCode 31.5M+),
+          # so the demo must use a higher versionCode or install fails
+          # with "应用版本错误" (version downgrade).
+          VERSION_CODE: '99900000'
         run: |
           if [ -n "${BUNDLE_NAME}" ]; then
             sed -i "s/\"bundleName\": \".*\"/\"bundleName\": \"${BUNDLE_NAME}\"/" harmony/AppScope/app.json5
@@ -200,6 +205,8 @@ jobs:
           else
             echo "using default bundleName from capacitor.config.ts"
           fi
+          sed -i "s/\"versionCode\": [0-9]*/\"versionCode\": ${VERSION_CODE}/" harmony/AppScope/app.json5
+          echo "versionCode set to ${VERSION_CODE}"
 
       # ── Build & sign HAP ────────────────────────────────────────────────
       - name: Build & sign HAP
