@@ -1,0 +1,32 @@
+# node
+node_modules/
+_lib/
+
+# capacitor generated native project
+harmony/
+
+# harmony build outputs
+oh_modules/
+entry/build/
+build/
+.hvigor/
+.cache/
+.cxx/
+
+# signing materials (NEVER commit)
+signing/
+*.p12
+*.cer
+*.p7b
+*.csr
+
+# downloaded native libs / headers
+entry/libs/
+entry/node-headers/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

@@ -1,0 +1,225 @@
+name: Build capacitor-harmony example HAP
+
+# Builds the demo app against the capacitor-harmony lib (pinned commit) and
+# uploads a signed HAP as a downloadable artifact. Push to a tracked branch
+# (main/build/dev) or run manually from Actions → "Run workflow".
+
+on:
+  push:
+    branches: [main, build, dev]
+  workflow_dispatch:
+    inputs:
+      build_mode:
+        description: 'Build mode'
+        required: true
+        default: 'release'
+        type: choice
+        options: [release, debug]
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Pin the capacitor-harmony commit under test. Bump this to re-test a change.
+  LIB_REF: db90bd3870f551257120a50f6c44a0883c1a06c8
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout example app
+        uses: actions/checkout@v4
+
+      - name: Checkout capacitor-harmony (lib under test) at pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: zxdong262/capacitor-harmony
+          path: _lib
+          ref: ${{ env.LIB_REF }}
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip jq python3 make g++ libsecret-1-dev
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      # ── Build the lib (produce dist/) ───────────────────────────────────
+      - name: Build capacitor-harmony lib
+        run: |
+          cd _lib
+          npm install
+          npm run build
+          ls dist | head
+
+      # ── Install example deps + link the local lib ──────────────────────
+      - name: Install example deps and link lib
+        run: |
+          npm install
+          npm install --no-save file:./_lib
+          npx cap --version
+
+      # ── Generate the harmony/ native project from the template ──────────
+      - name: Sync HarmonyOS platform
+        run: npx cap sync harmony
+
+      # ── Download / cache HarmonyOS Command Line Tools (~2 GB) ───────────
+      - name: Compute Command Line Tools cache key
+        id: cmdkey
+        env:
+          OHOS_CMDLINE_TOOLS_URL: ${{ secrets.OHOS_CMDLINE_TOOLS_URL }}
+        run: |
+          if [ -z "${OHOS_CMDLINE_TOOLS_URL}" ]; then
+            echo "::error::OHOS_CMDLINE_TOOLS_URL secret is not set."
+            exit 1
+          fi
+          HASH="$(echo -n "${OHOS_CMDLINE_TOOLS_URL}" | md5sum | cut -d' ' -f1)"
+          echo "key=cmdline-tools-${HASH}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Command Line Tools cache
+        id: cmdline_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/commandline-tools
+          key: ${{ steps.cmdkey.outputs.key }}
+
+      - name: Download & extract Command Line Tools
+        if: steps.cmdline_cache.outputs.cache-hit != 'true'
+        env:
+          OHOS_CMDLINE_TOOLS_URL: ${{ secrets.OHOS_CMDLINE_TOOLS_URL }}
+        run: |
+          set -euo pipefail
+          mkdir -p .cache
+          ZIP=".cache/commandline-tools.zip"
+          curl -L --retry 10 --retry-all-errors --retry-delay 5 -C - \
+            -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
+            -o "$ZIP" "${OHOS_CMDLINE_TOOLS_URL}"
+          if ! unzip -t "$ZIP" >/dev/null 2>&1; then
+            echo "::error::Downloaded archive is corrupt; retrying without resume"
+            curl -L --retry 10 --retry-all-errors --retry-delay 5 \
+              -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
+              -o "$ZIP" "${OHOS_CMDLINE_TOOLS_URL}"
+            unzip -t "$ZIP" >/dev/null 2>&1 || { echo "::error::Still corrupt"; exit 1; }
+          fi
+          rm -rf .cache/commandline-tools
+          mkdir -p .cache/commandline-tools
+          unzip -o -q "$ZIP" -d .cache/commandline-tools
+          rm -f "$ZIP"
+          echo "Downloaded and extracted HarmonyOS Command Line Tools"
+
+      - name: Save Command Line Tools cache
+        if: steps.cmdline_cache.outputs.cache-hit != 'true' && always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/commandline-tools
+          key: ${{ steps.cmdkey.outputs.key }}
+
+      - name: Configure Command Line Tools environment
+        run: |
+          set -euo pipefail
+          COMMANDLINE_TOOLS="$(pwd)/.cache/commandline-tools/command-line-tools"
+          if [ ! -d "$COMMANDLINE_TOOLS" ]; then
+            COMMANDLINE_TOOLS="$(cd "$(dirname "$(find .cache/commandline-tools -name ohpm -type f | head -1)")/.." && pwd)"
+          fi
+          echo '{"type":"commonjs"}' > "$COMMANDLINE_TOOLS/hvigor/package.json" 2>/dev/null || true
+          echo '{"type":"commonjs"}' > "$COMMANDLINE_TOOLS/package.json"
+          echo "COMMANDLINE_TOOLS=$COMMANDLINE_TOOLS" >> "$GITHUB_ENV"
+          echo "OHOS_SDK_HOME=$COMMANDLINE_TOOLS/sdk" >> "$GITHUB_ENV"
+          echo "$COMMANDLINE_TOOLS/bin" >> "$GITHUB_PATH"
+          echo "$COMMANDLINE_TOOLS/hvigor/bin" >> "$GITHUB_PATH"
+          echo "HarmonyOS Command Line Tools ready at $COMMANDLINE_TOOLS"
+
+      - name: Configure ohpm registry
+        run: ohpm config set registry https://ohpm.openharmony.cn/ohpm/ || true
+
+      # ── Fetch the embedded Node binary + headers ────────────────────────
+      - name: Prepare libnode.so (arm64)
+        run: |
+          cd harmony
+          bash scripts/prepare-node.sh arm64
+
+      - name: Prepare Node headers
+        run: |
+          cd harmony
+          bash scripts/prepare-headers.sh
+
+      # ── Decode signing materials (optional → unsigned build if absent) ──
+      - name: Decode signing materials
+        id: signing
+        env:
+          OHOS_KEYSTORE_B64: ${{ secrets.OHOS_KEYSTORE_B64 }}
+          OHOS_CERT_B64: ${{ secrets.OHOS_CERT_B64 }}
+          OHOS_PROFILE_B64: ${{ secrets.OHOS_PROFILE_B64 }}
+        run: |
+          mkdir -p signing
+          if [ -z "${OHOS_KEYSTORE_B64}" ] || [ -z "${OHOS_CERT_B64}" ] || [ -z "${OHOS_PROFILE_B64}" ]; then
+            echo "signing materials not provided — will build UNSIGNED hap"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "${OHOS_KEYSTORE_B64}" | base64 -d > signing/example.p12
+          echo "${OHOS_CERT_B64}" | base64 -d > signing/example.cer
+          echo "${OHOS_PROFILE_B64}" | base64 -d > signing/example.p7b
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "signing materials decoded"
+
+      - name: Configure bundle name
+        env:
+          BUNDLE_NAME: ${{ secrets.OHOS_BUNDLE_NAME }}
+        run: |
+          if [ -n "${BUNDLE_NAME}" ]; then
+            sed -i "s/\"bundleName\": \".*\"/\"bundleName\": \"${BUNDLE_NAME}\"/" harmony/AppScope/app.json5
+            echo "bundleName set to ${BUNDLE_NAME}"
+          else
+            echo "using default bundleName from capacitor.config.ts"
+          fi
+
+      # ── Build & sign HAP ────────────────────────────────────────────────
+      - name: Build & sign HAP
+        id: build
+        env:
+          SIGNING_ENABLED: ${{ steps.signing.outputs.enabled == 'true' && 'true' || 'false' }}
+          SIGNING_DIR: ${{ github.workspace }}/signing
+          KEYSTORE_FILE: example.p12
+          CERT_FILE: example.cer
+          PROFILE_FILE: example.p7b
+          KEY_ALIAS: ${{ secrets.OHOS_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.OHOS_KEY_PASSWORD }}
+          KEYSTORE_PASSWORD: ${{ secrets.OHOS_KEYSTORE_PASSWORD }}
+          BUILD_MODE: ${{ github.event.inputs.build_mode || 'release' }}
+          PROJECT_ROOT: harmony
+        run: bash scripts/build-hap-ci.sh
+
+      - name: Upload HAP artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harmony-demo-hap
+          path: ${{ steps.build.outputs.hap_path }}
+          retention-days: 30
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Lib commit | \`${{ env.LIB_REF }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| HAP | \`${{ steps.build.outputs.hap_path }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Signed | \`${{ steps.signing.outputs.enabled }}\` |" >> $GITHUB_STEP_SUMMARY

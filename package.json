@@ -1,0 +1,16 @@
+{
+  "name": "capacitor-harmony-example-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone demo app for capacitor-harmony (WebView + embedded Node.js on HarmonyOS). Built by CI into a signed HAP you can run on a Huawei cloud-debug real device to verify the lib.",
+  "scripts": {
+    "sync": "cap sync harmony"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.2.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.2"
+  }
+}
