@@ -189,15 +189,33 @@ else
 fi
 
 # --- Build APP bundle (multi-HAP .app package) -----------------------------
-# `assembleApp` packs the built HAP(s) into an .app bundle. Reuse the same
-# build; it consumes the HAP produced above.
-echo "==> Building APP bundle (${BUILD_MODE})"
-( cd "$PROJECT_ROOT" && "$HVIGORW" assembleApp --mode module \
-    -p module=entry@default -p product=default \
-    -p buildMode="$MODE_ARG" -p enableSignTask=false --no-daemon )
-
-UNSIGNED_APP="$(find "${PROJECT_ROOT}" -name '*-unsigned.app' -type f 2>/dev/null | head -1)"
-if [ -z "$UNSIGNED_APP" ]; then
+# This hvigor has no assembleApp task, so pack the .app ourselves with the
+# SDK's app_packing_tool.jar: unsigned HAP + pack.info -> unsigned .app,
+# per https://developer.huawei.com/consumer/cn/doc/harmonyos-faqs/faqs-package-structure-35
+echo "==> Packing APP bundle from unsigned HAP + pack.info"
+HAP_DIR="$(cd "$(dirname "${UNSIGNED_HAP}")" && pwd)"
+PACK_INFO="${HAP_DIR}/pack.info"
+if [ ! -f "$PACK_INFO" ]; then
+  PACK_INFO="$(find "${PROJECT_ROOT}" -name 'pack.info' -type f 2>/dev/null | head -1)"
+fi
+if [ -z "${PACK_INFO:-}" ] || [ ! -f "$PACK_INFO" ]; then
+  echo "::error::pack.info not found next to the unsigned HAP"
+  exit 1
+fi
+PACK_TOOL_JAR="${OHOS_SDK_HOME}/default/openharmony/toolchains/lib/app_packing_tool.jar"
+[ ! -f "$PACK_TOOL_JAR" ] && PACK_TOOL_JAR="$(find "$OHOS_SDK_HOME" -name app_packing_tool.jar -type f 2>/dev/null | head -1)"
+if [ -z "${PACK_TOOL_JAR:-}" ] || [ ! -f "$PACK_TOOL_JAR" ]; then
+  echo "::error::app_packing_tool.jar not found in SDK"
+  exit 1
+fi
+UNSIGNED_APP="${HAP_DIR}/$(basename "${UNSIGNED_HAP}" .hap).app"
+java -jar "$PACK_TOOL_JAR" \
+  --mode app \
+  --force true \
+  --pack-info-path "${PACK_INFO}" \
+  --hap-path "${UNSIGNED_HAP}" \
+  --out-path "${UNSIGNED_APP}"
+if [ ! -f "$UNSIGNED_APP" ]; then
   echo "::error::No unsigned APP produced"
   exit 1
 fi
