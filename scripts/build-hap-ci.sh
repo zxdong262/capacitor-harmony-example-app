@@ -106,7 +106,7 @@ BUNDLED_PLUGIN_DIR="${COMMANDLINE_TOOLS}/hvigor/hvigor-ohos-plugin"
 if [ -d "$BUNDLED_PLUGIN_DIR" ]; then
   cat > "${PROJECT_ROOT}/hvigor/hvigor-config.json5" <<HVIGORCFG
 {
-  "modelVersion": "5.3.15",
+  "modelVersion": "5.0.2",
   "dependencies": {
     "@ohos/hvigor-ohos-plugin": "file:${BUNDLED_PLUGIN_DIR}"
   },
