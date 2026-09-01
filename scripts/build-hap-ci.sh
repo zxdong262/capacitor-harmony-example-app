@@ -188,6 +188,49 @@ else
   echo "    (signing skipped — unsigned HAP)"
 fi
 
+# --- Build APP bundle (multi-HAP .app package) -----------------------------
+# `assembleApp` packs the built HAP(s) into an .app bundle. Reuse the same
+# build; it consumes the HAP produced above.
+echo "==> Building APP bundle (${BUILD_MODE})"
+( cd "$PROJECT_ROOT" && "$HVIGORW" assembleApp --mode module \
+    -p module=entry@default -p product=default \
+    -p buildMode="$MODE_ARG" -p enableSignTask=false --no-daemon )
+
+UNSIGNED_APP="$(find "${PROJECT_ROOT}" -name '*-unsigned.app' -type f 2>/dev/null | head -1)"
+if [ -z "$UNSIGNED_APP" ]; then
+  echo "::error::No unsigned APP produced"
+  exit 1
+fi
+echo "    ✓ Unsigned APP: ${UNSIGNED_APP} ($(du -h "${UNSIGNED_APP}" | cut -f1))"
+
+# --- Sign APP (optional) ---------------------------------------------------
+FINAL_APP="$UNSIGNED_APP"
+if [ "$SIGNING_ENABLED" = "true" ]; then
+  echo "==> Signing APP with hap-sign-tool.jar (sign-app)"
+  SIGNED_APP="${UNSIGNED_APP%-unsigned.app}-signed.app"
+  java -jar "$SIGN_TOOL_JAR" sign-app \
+    -mode localSign \
+    -keyAlias "${KEY_ALIAS}" \
+    -keyPwd "${KEY_PASSWORD}" \
+    -appCertFile "${CERT_PATH}" \
+    -profileFile "${PROFILE_PATH}" \
+    -inFile "${UNSIGNED_APP}" \
+    -signAlg SHA256withECDSA \
+    -keystoreFile "${KEYSTORE_PATH}" \
+    -keystorePwd "${KEYSTORE_PASSWORD}" \
+    -outFile "${SIGNED_APP}"
+  if [ ! -f "$SIGNED_APP" ]; then
+    echo "::error::APP signing failed"
+    exit 1
+  fi
+  FINAL_APP="$SIGNED_APP"
+  echo "    ✓ Signed APP: ${FINAL_APP} ($(du -h "${FINAL_APP}" | cut -f1))"
+else
+  echo "    (APP signing skipped — unsigned APP)"
+fi
+
 echo "hap_path=${FINAL_HAP}" >> "$GITHUB_OUTPUT"
+echo "app_path=${FINAL_APP}" >> "$GITHUB_OUTPUT"
 echo "signed=${SIGNED}" >> "$GITHUB_OUTPUT"
 echo "FINAL HAP: ${FINAL_HAP}"
+echo "FINAL APP: ${FINAL_APP}"

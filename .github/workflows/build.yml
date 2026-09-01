@@ -225,6 +225,14 @@ jobs:
           path: ${{ steps.build.outputs.hap_path }}
           retention-days: 30
 
+      - name: Upload signed APP artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harmony-demo-app
+          path: ${{ steps.build.outputs.app_path }}
+          retention-days: 30
+
       - name: Build summary
         if: always()
         run: |
@@ -234,4 +242,5 @@ jobs:
           echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Lib commit | \`${{ env.LIB_REF }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| HAP | \`${{ steps.build.outputs.hap_path }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| APP | \`${{ steps.build.outputs.app_path }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Signed | \`${{ steps.signing.outputs.enabled }}\` |" >> $GITHUB_STEP_SUMMARY
