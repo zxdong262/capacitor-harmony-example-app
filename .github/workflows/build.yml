@@ -76,7 +76,15 @@ jobs:
 
       # ── Generate the harmony/ native project from the template ──────────
       - name: Sync HarmonyOS platform
-        run: npx cap sync harmony
+        run: |
+          # The lib registers itself as the "harmony" Capacitor platform
+          # (package.json → "capacitor": { "platform": "harmony" }).
+          # `cap sync` requires the platform to be added first, so add it
+          # (idempotent — skip if harmony/ already exists from a prior step).
+          if [ ! -d harmony ]; then
+            npx cap add harmony
+          fi
+          npx cap sync harmony
 
       # ── Download / cache HarmonyOS Command Line Tools (~2 GB) ───────────
       - name: Compute Command Line Tools cache key
