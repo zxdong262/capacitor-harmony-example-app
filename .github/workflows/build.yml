@@ -25,7 +25,7 @@ permissions:
 
 env:
   # Pin the capacitor-harmony commit under test. Bump this to re-test a change.
-  LIB_REF: d437595c7efbc27bc4244834f5bb045f6e041cbc
+  LIB_REF: 63acef7e5e521bd16aa63f9025c49f4bfbead1d0
 
 jobs:
   build:
