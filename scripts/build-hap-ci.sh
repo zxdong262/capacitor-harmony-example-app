@@ -110,11 +110,13 @@ EOF
 echo "    build-profile.json5 generated (unsigned)"
 
 # --- Generate hvigor-config.json5 (use bundled plugin) --------------------
+# hvigor 6 (bundled with 6.0.1 commandline-tools) requires modelVersion in
+# [5.0.0, 6.0.1] and an equal modelVersion in the root oh-package.json5.
 BUNDLED_PLUGIN_DIR="${COMMANDLINE_TOOLS}/hvigor/hvigor-ohos-plugin"
 if [ -d "$BUNDLED_PLUGIN_DIR" ]; then
   cat > "${PROJECT_ROOT}/hvigor/hvigor-config.json5" <<HVIGORCFG
 {
-  "modelVersion": "5.0.2",
+  "modelVersion": "6.0.1",
   "dependencies": {
     "@ohos/hvigor-ohos-plugin": "file:${BUNDLED_PLUGIN_DIR}"
   },
@@ -127,7 +129,13 @@ if [ -d "$BUNDLED_PLUGIN_DIR" ]; then
   }
 }
 HVIGORCFG
-  echo "    hvigor-config.json5 generated (bundled plugin)"
+  echo "    hvigor-config.json5 generated (bundled plugin, modelVersion 6.0.1)"
+  # hvigor 6 requires oh-package.json5 modelVersion === hvigor-config modelVersion
+  OH_PACKAGE="${PROJECT_ROOT}/oh-package.json5"
+  if [ -f "$OH_PACKAGE" ] && ! grep -q '"modelVersion"' "$OH_PACKAGE"; then
+    sed -i 's/^{/{\n  "modelVersion": "6.0.1",/' "$OH_PACKAGE"
+    echo "    oh-package.json5: modelVersion 6.0.1 added"
+  fi
 fi
 
 # --- local.properties for hvigor ------------------------------------------

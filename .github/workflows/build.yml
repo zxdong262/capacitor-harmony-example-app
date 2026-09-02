@@ -94,7 +94,11 @@ jobs:
       - name: Compute Command Line Tools cache key
         id: cmdkey
         env:
-          OHOS_CMDLINE_TOOLS_URL: ${{ secrets.OHOS_CMDLINE_TOOLS_URL }}
+          # 6.0.1.251 bundles a Release-type SDK. The older 5.0.5.200 tools
+          # carry a Beta3 SDK whose HAPs are rejected by Release commercial
+          # devices (cloud debug shows "应用版本错误"). Override via repo
+          # variable OHOS_CMDLINE_TOOLS_URL if ever needed.
+          OHOS_CMDLINE_TOOLS_URL: ${{ vars.OHOS_CMDLINE_TOOLS_URL || 'https://hf-mirror.com/csukuangfj/harmonyos-commandline-tools/resolve/main/commandline-tools-linux-x64-6.0.1.251.zip' }}
         run: |
           if [ -z "${OHOS_CMDLINE_TOOLS_URL}" ]; then
             echo "::error::OHOS_CMDLINE_TOOLS_URL secret is not set."
@@ -113,7 +117,7 @@ jobs:
       - name: Download & extract Command Line Tools
         if: steps.cmdline_cache.outputs.cache-hit != 'true'
         env:
-          OHOS_CMDLINE_TOOLS_URL: ${{ secrets.OHOS_CMDLINE_TOOLS_URL }}
+          OHOS_CMDLINE_TOOLS_URL: ${{ vars.OHOS_CMDLINE_TOOLS_URL || 'https://hf-mirror.com/csukuangfj/harmonyos-commandline-tools/resolve/main/commandline-tools-linux-x64-6.0.1.251.zip' }}
         run: |
           set -euo pipefail
           mkdir -p .cache
