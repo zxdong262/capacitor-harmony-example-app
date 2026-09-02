@@ -132,9 +132,14 @@ HVIGORCFG
   echo "    hvigor-config.json5 generated (bundled plugin, modelVersion 6.0.1)"
   # hvigor 6 requires oh-package.json5 modelVersion === hvigor-config modelVersion
   OH_PACKAGE="${PROJECT_ROOT}/oh-package.json5"
-  if [ -f "$OH_PACKAGE" ] && ! grep -q '"modelVersion"' "$OH_PACKAGE"; then
-    sed -i 's/^{/{\n  "modelVersion": "6.0.1",/' "$OH_PACKAGE"
-    echo "    oh-package.json5: modelVersion 6.0.1 added"
+  if [ -f "$OH_PACKAGE" ]; then
+    if grep -q '"modelVersion"' "$OH_PACKAGE"; then
+      sed -i 's/"modelVersion": "[^"]*"/"modelVersion": "6.0.1"/' "$OH_PACKAGE"
+      echo "    oh-package.json5: modelVersion forced to 6.0.1"
+    else
+      sed -i 's/^{/{\n  "modelVersion": "6.0.1",/' "$OH_PACKAGE"
+      echo "    oh-package.json5: modelVersion 6.0.1 added"
+    fi
   fi
 fi
 
