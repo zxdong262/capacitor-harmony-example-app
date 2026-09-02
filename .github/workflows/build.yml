@@ -94,11 +94,10 @@ jobs:
       - name: Compute Command Line Tools cache key
         id: cmdkey
         env:
-          # 6.0.1.251 bundles a Release-type SDK. The older 5.0.5.200 tools
-          # carry a Beta3 SDK whose HAPs are rejected by Release commercial
-          # devices (cloud debug shows "应用版本错误"). Override via repo
-          # variable OHOS_CMDLINE_TOOLS_URL if ever needed.
-          OHOS_CMDLINE_TOOLS_URL: ${{ vars.OHOS_CMDLINE_TOOLS_URL || 'https://hf-mirror.com/csukuangfj/harmonyos-commandline-tools/resolve/main/commandline-tools-linux-x64-6.0.1.251.zip' }}
+          # Use the same 5.0.5.200 commandline-tools as electerm-harmony,
+          # whose .app packages install fine on cloud-debug devices. Keep the
+          # whole toolchain identical to eliminate variables.
+          OHOS_CMDLINE_TOOLS_URL: ${{ vars.OHOS_CMDLINE_TOOLS_URL || 'https://hf-mirror.com/csukuangfj/harmonyos-commandline-tools/resolve/main/commandline-tools-linux-x64-5.0.5.200.zip' }}
         run: |
           if [ -z "${OHOS_CMDLINE_TOOLS_URL}" ]; then
             echo "::error::OHOS_CMDLINE_TOOLS_URL secret is not set."
@@ -117,7 +116,7 @@ jobs:
       - name: Download & extract Command Line Tools
         if: steps.cmdline_cache.outputs.cache-hit != 'true'
         env:
-          OHOS_CMDLINE_TOOLS_URL: ${{ vars.OHOS_CMDLINE_TOOLS_URL || 'https://hf-mirror.com/csukuangfj/harmonyos-commandline-tools/resolve/main/commandline-tools-linux-x64-6.0.1.251.zip' }}
+          OHOS_CMDLINE_TOOLS_URL: ${{ vars.OHOS_CMDLINE_TOOLS_URL || 'https://hf-mirror.com/csukuangfj/harmonyos-commandline-tools/resolve/main/commandline-tools-linux-x64-5.0.5.200.zip' }}
         run: |
           set -euo pipefail
           mkdir -p .cache
@@ -228,14 +227,6 @@ jobs:
           PROJECT_ROOT: harmony
         run: bash scripts/build-hap-ci.sh
 
-      - name: Upload HAP artifact
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: harmony-demo-hap
-          path: ${{ steps.build.outputs.hap_path }}
-          retention-days: 30
-
       - name: Upload signed APP artifact
         if: success()
         uses: actions/upload-artifact@v4
@@ -252,6 +243,5 @@ jobs:
           echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Lib commit | \`${{ env.LIB_REF }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| HAP | \`${{ steps.build.outputs.hap_path }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| APP | \`${{ steps.build.outputs.app_path }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Signed | \`${{ steps.signing.outputs.enabled }}\` |" >> $GITHUB_STEP_SUMMARY
