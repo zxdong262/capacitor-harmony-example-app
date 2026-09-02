@@ -5,7 +5,7 @@ import { Logo } from './Logo';
 const isNative = Capacitor.isNativePlatform();
 const HOME = '__home__';
 
-type NodeStatusResult = { running: boolean; error: string; log: string };
+type NodeStatusResult = { running: boolean; error: string; log: string; extract?: string };
 type NodeInfoResult = { entry: string; entryPath: string; dir: string };
 
 function normalize(raw: string): string {
@@ -22,6 +22,7 @@ export default function App() {
   const [nodeStatus, setNodeStatus] = useState('booting…');
   const [nodeError, setNodeError] = useState('');
   const [nodeLog, setNodeLog] = useState('');
+  const [nodeExtract, setNodeExtract] = useState('');
   const [nodeInfo, setNodeInfo] = useState<NodeInfoResult | null>(null);
   const [apiReply, setApiReply] = useState('');
   const [urlText, setUrlText] = useState('');
@@ -42,6 +43,7 @@ export default function App() {
       setNodeStatus(r.running ? 'running' : 'stopped');
       setNodeError(r.error || '');
       setNodeLog(r.log || '');
+      setNodeExtract(r.extract || '');
     } catch (e) {
       setNodeStatus('error');
       setNodeError((e as Error).message || String(e));
@@ -236,6 +238,7 @@ export default function App() {
                   {`dir:   ${nodeInfo.dir}\nentry: ${nodeInfo.entry}\npath:  ${nodeInfo.entryPath}`}
                 </pre>
               )}
+              {nodeExtract && <pre className="meta">{`extract: ${nodeExtract}`}</pre>}
               {nodeLog && <pre className="log">{nodeLog}</pre>}
             </div>
             <p className="hint">Use the address bar above to browse the web inside this WebView.</p>
