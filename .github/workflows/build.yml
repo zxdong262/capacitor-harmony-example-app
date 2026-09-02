@@ -25,7 +25,7 @@ permissions:
 
 env:
   # Pin the capacitor-harmony commit under test. Bump this to re-test a change.
-  LIB_REF: cf8e083d1fa0d3b56bdc63b4feb6d1fc1be93e09
+  LIB_REF: 9a6d868d1c0f0f0e8f8d4f8b8e7c6b5a4d3c2b1a
 
 jobs:
   build:
@@ -60,10 +60,13 @@ jobs:
           java-version: '21'
 
       # ── Build the lib (produce dist/) ───────────────────────────────────
+      # `rm -rf dist` forces a clean recompile — tsc otherwise reuses a stale
+      # incremental cache and ships an out-of-date dist into the app.
       - name: Build capacitor-harmony lib
         run: |
           cd _lib
           npm install
+          rm -rf dist
           npm run build
           ls dist | head
 
@@ -75,6 +78,8 @@ jobs:
           # named after the platform ("harmony"), but our package is
           # "capacitor-harmony". Install it under the alias "harmony" so
           # `cap add harmony` / `cap sync harmony` can discover it.
+          # Remove any cached copy so the freshly-built dist is re-packed.
+          rm -rf node_modules/harmony
           npm install --no-save "harmony@file:./_lib"
           npx cap --version
 
