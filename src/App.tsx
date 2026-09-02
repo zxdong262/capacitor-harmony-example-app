@@ -3,7 +3,6 @@ import { Capacitor } from '@capacitor/core';
 import { Logo } from './Logo';
 
 const isNative = Capacitor.isNativePlatform();
-const API_URL = isNative ? 'http://127.0.0.1:3000/api/hello' : '/api/hello';
 const HOME = '__home__';
 
 function normalize(raw: string): string {
@@ -84,11 +83,30 @@ export default function App() {
   const testApi = async () => {
     setApiReply('loading…');
     try {
-      const res = await fetch(API_URL);
-      const data = await res.json();
-      setApiReply(JSON.stringify(data, null, 2));
+      // In the app, ArkWeb cannot open a socket to 127.0.0.1, so we proxy
+      // through the native Node bridge. In the browser preview, Vite proxies
+      // /api/* to the local backend.
+      let text: string;
+      if (isNative) {
+        const r = await Capacitor.nativePromise<{ status: number; body: string }>(
+          'Node',
+          'callApi',
+          { path: '/api/hello' },
+        );
+        let parsed: unknown = r.body;
+        try {
+          parsed = JSON.parse(r.body);
+        } catch {
+          /* keep raw body */
+        }
+        text = JSON.stringify({ status: r.status, body: parsed }, null, 2);
+      } else {
+        const res = await fetch('/api/hello');
+        text = JSON.stringify(await res.json(), null, 2);
+      }
+      setApiReply(text);
     } catch (e) {
-      setApiReply('fetch failed: ' + (e as Error).message);
+      setApiReply('call failed: ' + (e as Error).message);
     }
   };
 

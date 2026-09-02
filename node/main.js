@@ -1,8 +1,12 @@
 // node/main.js
 //
 // Bundled into `rawfile/node/` and run by the embedded Node.js runtime inside
-// the HarmonyOS app.  It serves a tiny JSON API on 127.0.0.1:3000 — the WebView
-// reaches it with `fetch('http://127.0.0.1:3000/...')`.
+// the HarmonyOS app.  It serves a tiny JSON API on 127.0.0.1:3000.
+//
+// IMPORTANT: the WebView (ArkWeb) cannot open a socket to 127.0.0.1, so the web
+// layer must NOT fetch this directly.  Instead the `Node.callApi` native plugin
+// method proxies the request from the native side (which CAN reach the loopback)
+// and returns the body to JS.  See assets/native-template .../plugins/Node.ets.
 //
 // Files under the same directory are available via `require()` and `fs`, since
 // the runtime unpacks `rawfile/node/**` into the app's writable filesDir.
