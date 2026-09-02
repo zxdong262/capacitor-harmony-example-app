@@ -25,7 +25,7 @@ permissions:
 
 env:
   # Pin the capacitor-harmony commit under test. Bump this to re-test a change.
-  LIB_REF: 91fda37372e1ee75dd6837e666bfb889185fc881
+  LIB_REF: 1f6adefe37a9f4487e2d33583ea6df6a1c9f7fca
 
 jobs:
   build:
@@ -77,6 +77,12 @@ jobs:
           # `cap add harmony` / `cap sync harmony` can discover it.
           npm install --no-save "harmony@file:./_lib"
           npx cap --version
+
+      # ── Build the web frontend (Vite → www/) ───────────────────────────
+      # `npm run build` runs `vite build`, which emits the React app into
+      # `www/`. `cap sync harmony` then copies `www/` into harmony/rawfile/.
+      - name: Build web frontend
+        run: npm run build
 
       # ── Generate the harmony/ native project from the template ──────────
       - name: Sync HarmonyOS platform

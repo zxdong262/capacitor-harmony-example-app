@@ -11,7 +11,22 @@ const http = require('http');
 
 const PORT = 3000;
 
+// The WebView reaches this backend cross-origin (from file:// or
+// http://localhost), so CORS headers are required or the fetch is blocked.
+function setCors(res, req) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') {
+    res.statusCode = 204;
+    res.end();
+    return true; // handled
+  }
+  return false;
+}
+
 const server = http.createServer((req, res) => {
+  if (setCors(res, req)) return;
   res.setHeader('Content-Type', 'application/json');
   if (req.url === '/api/hello') {
     res.end(JSON.stringify({ ok: true, platform: 'harmony', node: process.version, time: Date.now() }));
