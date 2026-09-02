@@ -5,6 +5,9 @@ import { Logo } from './Logo';
 const isNative = Capacitor.isNativePlatform();
 const HOME = '__home__';
 
+type NodeStatusResult = { running: boolean; error: string; log: string };
+type NodeInfoResult = { entry: string; entryPath: string; dir: string };
+
 function normalize(raw: string): string {
   const u = raw.trim();
   if (!u) return '';
@@ -17,6 +20,9 @@ function normalize(raw: string): string {
 
 export default function App() {
   const [nodeStatus, setNodeStatus] = useState('booting…');
+  const [nodeError, setNodeError] = useState('');
+  const [nodeLog, setNodeLog] = useState('');
+  const [nodeInfo, setNodeInfo] = useState<NodeInfoResult | null>(null);
   const [apiReply, setApiReply] = useState('');
   const [urlText, setUrlText] = useState('');
   const [current, setCurrent] = useState(HOME);
@@ -25,15 +31,47 @@ export default function App() {
   const [reloadKey, setReloadKey] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  useEffect(() => {
-    if (isNative) {
-      Capacitor.nativePromise<{ running: boolean }>('Node', 'getStatus')
-        .then((r) => setNodeStatus(r.running ? 'running' : 'stopped'))
-        .catch((err) => setNodeStatus('error: ' + err));
-    } else {
-      setNodeStatus('n/a (browser preview)');
+  // The boot log is the only evidence we get off a cloud-debug device, so keep
+  // polling it while the backend is down and show it verbatim.
+  const refreshNode = useCallback(async () => {
+    if (!isNative) {
+      return;
+    }
+    try {
+      const r = await Capacitor.nativePromise<NodeStatusResult>('Node', 'getStatus');
+      setNodeStatus(r.running ? 'running' : 'stopped');
+      setNodeError(r.error || '');
+      setNodeLog(r.log || '');
+    } catch (e) {
+      setNodeStatus('error');
+      setNodeError((e as Error).message || String(e));
+    }
+    try {
+      setNodeInfo(await Capacitor.nativePromise<NodeInfoResult>('Node', 'getInfo'));
+    } catch {
+      /* info is optional */
     }
   }, []);
+
+  useEffect(() => {
+    if (!isNative) {
+      setNodeStatus('n/a (browser preview)');
+      return;
+    }
+    let alive: boolean = true;
+    const tick = (): void => {
+      if (!alive) {
+        return;
+      }
+      void refreshNode();
+    };
+    tick();
+    const timer: number = window.setInterval(tick, 2500);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [refreshNode]);
 
   const goto = useCallback(
     (raw: string) => {
@@ -44,7 +82,7 @@ export default function App() {
       setCurrent(u);
       setUrlText(u === HOME ? '' : u);
     },
-    [idx]
+    [idx],
   );
 
   const back = useCallback((): boolean => {
@@ -80,6 +118,25 @@ export default function App() {
     };
   }, [back]);
 
+  const startNode = async () => {
+    setNodeError('');
+    try {
+      await Capacitor.nativePromise('Node', 'start');
+    } catch (e) {
+      setNodeError((e as Error).message || String(e));
+    }
+    await refreshNode();
+  };
+
+  const stopNode = async () => {
+    try {
+      await Capacitor.nativePromise('Node', 'stop');
+    } catch (e) {
+      setNodeError((e as Error).message || String(e));
+    }
+    await refreshNode();
+  };
+
   const testApi = async () => {
     setApiReply('loading…');
     try {
@@ -107,6 +164,7 @@ export default function App() {
       setApiReply(text);
     } catch (e) {
       setApiReply('call failed: ' + (e as Error).message);
+      void refreshNode();
     }
   };
 
@@ -156,13 +214,29 @@ export default function App() {
               A HarmonyOS app: a native WebView hosts web content and an embedded
               Node.js runtime runs alongside it.
             </p>
-            <div className="status">
+            <div className={`status ${nodeStatus === 'running' ? 'run' : 'stop'}`}>
               Node: <span>{nodeStatus}</span>
             </div>
             <div className="card">
-              <h2>Node backend API</h2>
-              <button onClick={testApi}>Call /api/hello</button>
+              <h2>Node backend</h2>
+              <div className="row">
+                <button onClick={startNode}>Start</button>
+                <button className="ghost" onClick={stopNode}>
+                  Stop
+                </button>
+                <button className="ghost" onClick={() => void refreshNode()}>
+                  Refresh
+                </button>
+                <button onClick={testApi}>Call /api/hello</button>
+              </div>
+              {nodeError && <pre className="error">{nodeError}</pre>}
               {apiReply && <pre>{apiReply}</pre>}
+              {nodeInfo && (
+                <pre className="meta">
+                  {`dir:   ${nodeInfo.dir}\nentry: ${nodeInfo.entry}\npath:  ${nodeInfo.entryPath}`}
+                </pre>
+              )}
+              {nodeLog && <pre className="log">{nodeLog}</pre>}
             </div>
             <p className="hint">Use the address bar above to browse the web inside this WebView.</p>
           </div>
