@@ -1,0 +1,266 @@
+name: Build capacitor-harmony example APP
+
+# Builds the demo app against the published capacitor-harmony lib and uploads
+# a signed APP as a downloadable artifact. Push to a tracked branch
+# (main/build/dev) or run manually from Actions → "Run workflow".
+
+on:
+  push:
+    branches: [main, build, dev]
+  workflow_dispatch:
+    inputs:
+      build_mode:
+        description: 'Build mode'
+        required: true
+        default: 'release'
+        type: choice
+        options: [release, debug]
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Version of the published capacitor-harmony package under test.
+  # Bump this after each lib release.
+  LIB_VERSION: 0.1.2
+  # To test an UNRELEASED lib commit instead, set LIB_REF to the commit SHA
+  # (e.g. via workflow_dispatch or an edit). When non-empty, CI checks out
+  # zxdong262/capacitor-harmony at that ref, builds it, and links it with
+  # `harmony@file:./_lib` instead of the npm version above.
+  LIB_REF: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout example app
+        uses: actions/checkout@v4
+
+      - name: Checkout capacitor-harmony (only for unreleased LIB_REF)
+        if: env.LIB_REF != ''
+        uses: actions/checkout@v4
+        with:
+          repository: zxdong262/capacitor-harmony
+          path: _lib
+          ref: ${{ env.LIB_REF }}
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip jq python3 make g++ libsecret-1-dev
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      # ── Build the lib from source (only when testing unreleased LIB_REF) ──
+      # `rm -rf dist` forces a clean recompile — tsc otherwise reuses a stale
+      # incremental cache and ships an out-of-date dist into the app.
+      - name: Build capacitor-harmony lib from source
+        if: env.LIB_REF != ''
+        run: |
+          cd _lib
+          npm install
+          rm -rf dist
+          npm run build
+          ls dist | head
+
+      # ── Install example deps + link the lib under test ──────────────────
+      - name: Install example deps and link lib
+        run: |
+          npm install
+          # Capacitor CLI resolves a custom platform by a package literally
+          # named after the platform ("harmony"), but our package is
+          # "capacitor-harmony". Install it under the alias "harmony" so
+          # `cap add harmony` / `cap sync harmony` can discover it.
+          # Remove any cached copy so a fresh dist is re-packed.
+          rm -rf node_modules/harmony
+          if [ -n "${{ env.LIB_REF }}" ]; then
+            npm install --no-save "harmony@file:./_lib"
+          else
+            npm install --no-save "harmony@npm:capacitor-harmony@${{ env.LIB_VERSION }}"
+          fi
+          npx cap --version
+
+      # ── Build the web frontend (Vite → www/) ───────────────────────────
+      # `npm run build` runs `vite build`, which emits the React app into
+      # `www/`. `cap sync harmony` then copies `www/` into harmony/rawfile/.
+      - name: Build web frontend
+        run: npm run build
+
+      # ── Generate the harmony/ native project from the template ──────────
+      - name: Sync HarmonyOS platform
+        run: |
+          # The lib registers itself as the "harmony" Capacitor platform
+          # (package.json → "capacitor": { "platform": "harmony" }).
+          # `cap sync` requires the platform to be added first, so add it
+          # (idempotent — skip if harmony/ already exists from a prior step).
+          if [ ! -d harmony ]; then
+            npx cap add harmony
+          fi
+          npx cap sync harmony
+
+      # ── Download / cache HarmonyOS Command Line Tools (~2 GB) ───────────
+      - name: Compute Command Line Tools cache key
+        id: cmdkey
+        env:
+          # Use the same 5.0.5.200 commandline-tools as electerm-harmony,
+          # whose .app packages install fine on cloud-debug devices. Keep the
+          # whole toolchain identical to eliminate variables.
+          OHOS_CMDLINE_TOOLS_URL: ${{ vars.OHOS_CMDLINE_TOOLS_URL || 'https://hf-mirror.com/csukuangfj/harmonyos-commandline-tools/resolve/main/commandline-tools-linux-x64-5.0.5.200.zip' }}
+        run: |
+          if [ -z "${OHOS_CMDLINE_TOOLS_URL}" ]; then
+            echo "::error::OHOS_CMDLINE_TOOLS_URL secret is not set."
+            exit 1
+          fi
+          HASH="$(echo -n "${OHOS_CMDLINE_TOOLS_URL}" | md5sum | cut -d' ' -f1)"
+          echo "key=cmdline-tools-${HASH}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Command Line Tools cache
+        id: cmdline_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/commandline-tools
+          key: ${{ steps.cmdkey.outputs.key }}
+
+      - name: Download & extract Command Line Tools
+        if: steps.cmdline_cache.outputs.cache-hit != 'true'
+        env:
+          OHOS_CMDLINE_TOOLS_URL: ${{ vars.OHOS_CMDLINE_TOOLS_URL || 'https://hf-mirror.com/csukuangfj/harmonyos-commandline-tools/resolve/main/commandline-tools-linux-x64-5.0.5.200.zip' }}
+        run: |
+          set -euo pipefail
+          mkdir -p .cache
+          ZIP=".cache/commandline-tools.zip"
+          curl -L --retry 10 --retry-all-errors --retry-delay 5 -C - \
+            -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
+            -o "$ZIP" "${OHOS_CMDLINE_TOOLS_URL}"
+          if ! unzip -t "$ZIP" >/dev/null 2>&1; then
+            echo "::error::Downloaded archive is corrupt; retrying without resume"
+            curl -L --retry 10 --retry-all-errors --retry-delay 5 \
+              -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
+              -o "$ZIP" "${OHOS_CMDLINE_TOOLS_URL}"
+            unzip -t "$ZIP" >/dev/null 2>&1 || { echo "::error::Still corrupt"; exit 1; }
+          fi
+          rm -rf .cache/commandline-tools
+          mkdir -p .cache/commandline-tools
+          unzip -o -q "$ZIP" -d .cache/commandline-tools
+          rm -f "$ZIP"
+          echo "Downloaded and extracted HarmonyOS Command Line Tools"
+
+      - name: Save Command Line Tools cache
+        if: steps.cmdline_cache.outputs.cache-hit != 'true' && always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/commandline-tools
+          key: ${{ steps.cmdkey.outputs.key }}
+
+      - name: Configure Command Line Tools environment
+        run: |
+          set -euo pipefail
+          COMMANDLINE_TOOLS="$(pwd)/.cache/commandline-tools/command-line-tools"
+          if [ ! -d "$COMMANDLINE_TOOLS" ]; then
+            COMMANDLINE_TOOLS="$(cd "$(dirname "$(find .cache/commandline-tools -name ohpm -type f | head -1)")/.." && pwd)"
+          fi
+          echo '{"type":"commonjs"}' > "$COMMANDLINE_TOOLS/hvigor/package.json" 2>/dev/null || true
+          echo '{"type":"commonjs"}' > "$COMMANDLINE_TOOLS/package.json"
+          echo "COMMANDLINE_TOOLS=$COMMANDLINE_TOOLS" >> "$GITHUB_ENV"
+          echo "OHOS_SDK_HOME=$COMMANDLINE_TOOLS/sdk" >> "$GITHUB_ENV"
+          echo "$COMMANDLINE_TOOLS/bin" >> "$GITHUB_PATH"
+          echo "$COMMANDLINE_TOOLS/hvigor/bin" >> "$GITHUB_PATH"
+          echo "HarmonyOS Command Line Tools ready at $COMMANDLINE_TOOLS"
+
+      - name: Configure ohpm registry
+        run: ohpm config set registry https://ohpm.openharmony.cn/ohpm/ || true
+
+      # ── Fetch the embedded Node binary + headers ────────────────────────
+      - name: Prepare libnode.so (arm64)
+        run: |
+          cd harmony
+          bash scripts/prepare-node.sh arm64
+
+      # ── Decode signing materials (optional → unsigned build if absent) ──
+      - name: Decode signing materials
+        id: signing
+        env:
+          OHOS_KEYSTORE_B64: ${{ secrets.OHOS_KEYSTORE_B64 }}
+          OHOS_CERT_B64: ${{ secrets.OHOS_CERT_B64 }}
+          OHOS_PROFILE_B64: ${{ secrets.OHOS_PROFILE_B64 }}
+        run: |
+          mkdir -p signing
+          if [ -z "${OHOS_KEYSTORE_B64}" ] || [ -z "${OHOS_CERT_B64}" ] || [ -z "${OHOS_PROFILE_B64}" ]; then
+            echo "signing materials not provided — will build UNSIGNED app"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "${OHOS_KEYSTORE_B64}" | base64 -d > signing/example.p12
+          echo "${OHOS_CERT_B64}" | base64 -d > signing/example.cer
+          echo "${OHOS_PROFILE_B64}" | base64 -d > signing/example.p7b
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "signing materials decoded"
+
+      - name: Configure bundle name & versionCode
+        env:
+          BUNDLE_NAME: ${{ secrets.OHOS_BUNDLE_NAME }}
+          # Cloud debug remembers uploads per bundleName. We share the
+          # electerm bundle (org.electerm.electerm, versionCode 31.5M+),
+          # so the demo must use a higher versionCode or install fails
+          # with "应用版本错误" (version downgrade).
+          VERSION_CODE: '99900000'
+        run: |
+          if [ -n "${BUNDLE_NAME}" ]; then
+            sed -i "s/\"bundleName\": \".*\"/\"bundleName\": \"${BUNDLE_NAME}\"/" harmony/AppScope/app.json5
+            echo "bundleName set to ${BUNDLE_NAME}"
+          else
+            echo "using default bundleName from capacitor.config.ts"
+          fi
+          sed -i "s/\"versionCode\": [0-9]*/\"versionCode\": ${VERSION_CODE}/" harmony/AppScope/app.json5
+          echo "versionCode set to ${VERSION_CODE}"
+
+      # ── Build & sign APP ────────────────────────────────────────────────
+      - name: Build & sign APP
+        id: build
+        env:
+          SIGNING_ENABLED: ${{ steps.signing.outputs.enabled == 'true' && 'true' || 'false' }}
+          SIGNING_DIR: ${{ github.workspace }}/signing
+          KEYSTORE_FILE: example.p12
+          CERT_FILE: example.cer
+          PROFILE_FILE: example.p7b
+          KEY_ALIAS: ${{ secrets.OHOS_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.OHOS_KEY_PASSWORD }}
+          KEYSTORE_PASSWORD: ${{ secrets.OHOS_KEYSTORE_PASSWORD }}
+          BUILD_MODE: ${{ github.event.inputs.build_mode || 'release' }}
+          PROJECT_ROOT: harmony
+        run: bash scripts/build-hap-ci.sh
+
+      - name: Upload signed APP artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harmony-demo-app
+          path: ${{ steps.build.outputs.app_path }}
+          retention-days: 30
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Lib version | \`capacitor-harmony@${{ env.LIB_VERSION }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Lib commit | \`${{ env.LIB_REF }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| APP | \`${{ steps.build.outputs.app_path }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Signed | \`${{ steps.signing.outputs.enabled }}\` |" >> $GITHUB_STEP_SUMMARY
